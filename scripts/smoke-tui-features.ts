@@ -76,6 +76,7 @@ async function waitForLoginRefresh(label: string, start: number): Promise<void> 
   await waitFor(label,
     /External login command completed\.[\s\S]*Model access configured via[\s\S]*config\.json[\s\S]*\[ ✓ [^\]]+\]/i,
     start);
+  await waitFor(`${label} model`, /◈ zai\/override-model/u, start);
 }
 
 const timeout = setTimeout(() => child.kill("SIGKILL"), 45_000);
@@ -125,6 +126,9 @@ try {
   await sendAndWait("/prepare-failing-login\r", "prepare OAuth failure", /Failing login prepared\./i);
   await sendAndWait("/login\r", "failure login setup picker", /Set Up Coding Plan/i);
   await sendAndWait("\x1b[B\r", "restored OAuth failure", /Login failed: OAuth HTTP error 404 \(empty or non-JSON response\)/i);
+  // Login now updates the session model; restore the shortcut scenario's model.
+  await sendAndWait("/model\r", "restore model picker", /Select model/i);
+  await sendAndWait("alpha\r", "restore model for shortcuts", /Session model now: alpha\/model/i);
   await sendAndWait("/help\r", "long help", /Use \/help <command> for details/i);
   await sendAndWait("\x1b[Z", "edit mode shortcut", /◈ alpha\/model ─ ◉ edit ─ ⚡ low/i);
   await Bun.sleep(1_100);

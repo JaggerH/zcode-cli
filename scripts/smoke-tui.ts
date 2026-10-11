@@ -213,9 +213,14 @@ try {
   );
   await waitFor(
     "API key turn completion",
-    new RegExp(`(?:Configured Z\\.AI Coding Plan|已配置 Z\\.AI Coding Plan)[\\s\\S]*◈ ${literal(zaiModel)}`, "i"),
+    /(?:Configured Z\.AI Coding Plan|已配置 Z\.AI Coding Plan)[\s\S]*\[ ✓ [^\]]+\]/i,
     apiKeySetupStart
   );
+  // The footer may shorten provider-qualified models to fit the terminal.
+  // Inspect session status after the login turn settles to check the full ID.
+  await sendAndWait("/status\r", "Z.AI session model", new RegExp(`Model\\s+${literal(zaiModel)}(?:\\s|$)`, "i"));
+  terminal.write("\r");
+  await Bun.sleep(50);
   await sendAndWait("/login\r", "reopened login setup picker", /Set Up Coding Plan|配置 Coding Plan/i);
   await sendAndWait(
     "\x1b[B\x1b[B\x1b[B\r",
@@ -230,10 +235,11 @@ try {
   );
   await waitFor(
     "BigModel API key turn completion",
-    new RegExp(`(?:Configured BigModel Coding Plan|已配置 BigModel Coding Plan)[\\s\\S]*◈ ${literal(bigmodelModel)}`, "i"),
+    /(?:Configured BigModel Coding Plan|已配置 BigModel Coding Plan)[\s\S]*\[ ✓ [^\]]+\]/i,
     bigmodelSetupStart
   );
-  await sendAndWait("/status\r", "status details", /Runtime version\s+\d+/i);
+  const statusStart = await sendAndWait("/status\r", "status details", /Runtime version\s+\d+/i);
+  await waitFor("BigModel session model", new RegExp(`Model\\s+${literal(bigmodelModel)}(?:\\s|$)`, "i"), statusStart);
   terminal.write("\r");
   await Bun.sleep(50);
   await sendAndWait("/help\r", "help output", /Slash commands:|Usage:/i);
