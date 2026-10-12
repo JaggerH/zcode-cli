@@ -48,8 +48,12 @@ type ExecutableResolver = (name: string) => string | null;
 
 interface TurnNotifierOptions {
   writeTerminal: (data: string) => void;
-  /** Keep terminal focus reports enabled for fullscreen redraw recovery. */
-  focusReportingRequired?: boolean;
+  /**
+   * Called whenever a focus report moves the terminal between focused and
+   * unfocused. The stop reset does not fire it so consumers can keep their
+   * last known state.
+   */
+  onFocusChange?: (state: TerminalFocusState) => void;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   nativeNotify?: NativeNotificationSender;
@@ -278,7 +282,6 @@ export class TurnNotifier {
   private settings: NotificationSettings;
   private active = false;
   private focusReporting = false;
-  private focusReportingRequired: boolean;
   private terminalFocus: TerminalFocusState = "unknown";
   private terminalUnavailable = false;
 
@@ -289,7 +292,6 @@ export class TurnNotifier {
       sendNativeNotification(platform, title, body, this.env)
     ));
     this.settings = options.settings ?? notificationSettings(this.env);
-    this.focusReportingRequired = options.focusReportingRequired === true;
   }
 
   start(): void {
@@ -317,27 +319,28 @@ export class TurnNotifier {
   }
 
   setSettings(settings: NotificationSettings): void {
-    if (this.settings.condition !== settings.condition) this.terminalFocus = "unknown";
+    // Focus reporting stays enabled across settings changes, so focus
+    // knowledge remains valid and is not reset here.
     this.settings = { ...settings };
-    this.syncFocusReporting();
-  }
-
-  setFocusReportingRequired(required: boolean): void {
-    if (this.focusReportingRequired === required) return;
-    this.focusReportingRequired = required;
     this.syncFocusReporting();
   }
 
   handleInput(data: string): boolean {
     if (data === focusIn) {
-      this.terminalFocus = "focused";
+      this.setFocusState("focused");
       return true;
     }
     if (data === focusOut) {
-      this.terminalFocus = "unfocused";
+      this.setFocusState("unfocused");
       return true;
     }
     return false;
+  }
+
+  private setFocusState(state: TerminalFocusState): void {
+    if (this.terminalFocus === state) return;
+    this.terminalFocus = state;
+    this.options.onFocusChange?.(state);
   }
 
   async notify(kind: TurnNotificationKind, detail = ""): Promise<boolean> {
@@ -394,16 +397,13 @@ export class TurnNotifier {
   }
 
   private syncFocusReporting(): void {
-    if (
-      !this.active ||
-      (!this.focusReportingRequired && (
-        this.settings.method === "off" ||
-        this.settings.condition !== "unfocused"
-      ))
-    ) {
+    if (!this.active) {
       this.disableFocusReporting();
       return;
     }
+    // Focus reports drive unfocused-turn notifications, fullscreen redraw
+    // recovery, and hiding the hardware cursor while another pane has focus,
+    // so keep them enabled in every mode and notification configuration.
     if (!this.focusReporting && this.writeTerminal(focusReportingEnable)) {
       this.focusReporting = true;
     }

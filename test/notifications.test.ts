@@ -19,6 +19,8 @@ import {
   terminalNotifierCommand,
   TurnNotifier,
   writeNotificationSettings,
+  type NotificationCondition,
+  type NotificationMethod,
   type NativeNotificationSender
 } from "../packages/zcode-tui/src/notifications.ts";
 import { watchStreamErrors } from "../packages/zcode-tui/src/stream-error-guard.ts";
@@ -32,6 +34,42 @@ afterEach(async () => {
 });
 
 describe("TUI turn notifications", () => {
+  for (const method of ["off", "auto", "osc9", "bel", "native"] satisfies NotificationMethod[]) {
+    for (const condition of ["always", "unfocused"] satisfies NotificationCondition[]) {
+      test(`tracks focus independently of ${method}/${condition} notifications`, async () => {
+        const writes: string[] = [];
+        const states: string[] = [];
+        const notifier = new TurnNotifier({
+          settings: { method, condition },
+          env: { TERM_PROGRAM: "iTerm.app" },
+          nativeNotify: async () => true,
+          writeTerminal: (data) => writes.push(data),
+          onFocusChange: (state) => states.push(state)
+        });
+        notifier.start();
+        expect(writes).toEqual(["\x1b[?1004h"]);
+        // No reports is a supported fallback, not evidence of focus loss.
+        expect(notifier.diagnostics().focus).toBe("unknown");
+        expect(await notifier.notify("completed")).toBe(method !== "off");
+        notifier.handleInput("\x1b[I");
+        expect(await notifier.notify("completed")).toBe(method !== "off" && condition === "always");
+        notifier.handleInput("\x1b[O");
+        notifier.handleInput("\x1b[O");
+        expect(await notifier.notify("completed")).toBe(method !== "off");
+        notifier.setSettings({ method, condition: condition === "always" ? "unfocused" : "always" });
+        expect(notifier.diagnostics().focus).toBe("unfocused");
+        expect(writes.filter((data) => data.includes("1004"))).toEqual(["\x1b[?1004h"]);
+        notifier.stop();
+        notifier.start();
+        expect(states).toEqual(["focused", "unfocused"]);
+        notifier.handleInput("\x1b[I");
+        expect(states).toEqual(["focused", "unfocused", "focused"]);
+        notifier.stop();
+        expect(writes.at(-1)).toBe("\x1b[?1004l");
+      });
+    }
+  }
+
   test("uses quiet defaults and accepts explicit delivery settings", () => {
     expect(notificationSettings({})).toEqual({ method: "auto", condition: "unfocused" });
     expect(notificationSettings({
@@ -183,7 +221,7 @@ describe("TUI turn notifications", () => {
     expect(writes.at(-1)).toBe("\x1b[?1004l");
   });
 
-  test("applies changed settings to focus reporting immediately", () => {
+  test("keeps focus reporting enabled across notification settings", () => {
     const writes: string[] = [];
     const notifier = new TurnNotifier({
       settings: { method: "auto", condition: "unfocused" },
@@ -191,28 +229,41 @@ describe("TUI turn notifications", () => {
     });
 
     notifier.start();
+    expect(notifier.handleInput("\x1b[I")).toBe(true);
     notifier.setSettings({ method: "off", condition: "unfocused" });
     notifier.setSettings({ method: "bel", condition: "always" });
     notifier.setSettings({ method: "bel", condition: "unfocused" });
 
     expect(notifier.currentSettings()).toEqual({ method: "bel", condition: "unfocused" });
-    expect(writes).toEqual(["\x1b[?1004h", "\x1b[?1004l", "\x1b[?1004h"]);
+    expect(writes).toEqual(["\x1b[?1004h"]);
+    // Reporting never turns off mid-session, so focus knowledge survives.
+    expect(notifier.diagnostics().focus).toBe("focused");
   });
 
-  test("keeps focus reporting for fullscreen redraws when notifications are off", () => {
+  test("reports focus transitions even when notifications are off", () => {
     const writes: string[] = [];
+    const states: string[] = [];
     const notifier = new TurnNotifier({
       settings: { method: "off", condition: "always" },
-      focusReportingRequired: true,
+      onFocusChange: (state) => states.push(state),
       writeTerminal: (data) => writes.push(data)
     });
 
     notifier.start();
-    notifier.setSettings({ method: "off", condition: "unfocused" });
     expect(writes).toEqual(["\x1b[?1004h"]);
 
-    notifier.setFocusReportingRequired(false);
-    expect(writes).toEqual(["\x1b[?1004h", "\x1b[?1004l"]);
+    expect(notifier.handleInput("\x1b[O")).toBe(true);
+    // Repeated reports of the same state must not re-fire the callback.
+    expect(notifier.handleInput("\x1b[O")).toBe(true);
+    expect(notifier.handleInput("\x1b[I")).toBe(true);
+    expect(notifier.handleInput("x")).toBe(false);
+    expect(states).toEqual(["unfocused", "focused"]);
+
+    notifier.stop();
+    expect(writes.at(-1)).toBe("\x1b[?1004l");
+    // Focus knowledge resets do not fire the callback, so cursor owners can
+    // keep their last known state across stop/start cycles.
+    expect(states).toEqual(["unfocused", "focused"]);
   });
 
   test("uses Codex-style BEL fallback in Apple Terminal without requiring focus support", async () => {
@@ -287,7 +338,7 @@ describe("TUI turn notifications", () => {
 
     notifier.start();
     expect(await notifier.notify("completed", "Done")).toBe(true);
-    expect(writes).toEqual(["\x07"]);
+    expect(writes).toEqual(["\x1b[?1004h", "\x07"]);
 
     failing = true;
     expect(await notifier.notify("completed", "Done")).toBe(false);
@@ -295,10 +346,10 @@ describe("TUI turn notifications", () => {
     // The failure is sticky: writes stay suppressed even after the underlying
     // stream would accept data again.
     expect(await notifier.notify("completed", "Done")).toBe(false);
-    expect(writes).toEqual(["\x07"]);
+    expect(writes).toEqual(["\x1b[?1004h", "\x07"]);
 
     notifier.stop();
-    expect(writes).toEqual(["\x07"]);
+    expect(writes).toEqual(["\x1b[?1004h", "\x07"]);
   });
 
   test("stops terminal writes after an asynchronous stream error", async () => {
@@ -330,7 +381,7 @@ describe("TUI turn notifications", () => {
     expect(handledErrors).toBe(1);
     expect(await notifier.notify("completed", "Done")).toBe(false);
     notifier.stop();
-    expect(writes).toEqual(["\x07"]);
+    expect(writes).toEqual(["\x1b[?1004h", "\x07"]);
 
     dispose();
     dispose();
@@ -364,6 +415,6 @@ describe("TUI turn notifications", () => {
     disabled.start();
     expect(await disabled.notify("completed", "Done")).toBe(false);
     disabled.stop();
-    expect(writes).toEqual(["\x07"]);
+    expect(writes).toEqual(["\x07", "\x1b[?1004h", "\x1b[?1004l"]);
   });
 });

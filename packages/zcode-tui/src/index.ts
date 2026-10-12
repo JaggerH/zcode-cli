@@ -36,8 +36,11 @@ import {
   type TUI,
   type TuiMode,
   type Component,
+  type OverlayHandle,
+  type OverlayOptions,
   type SlashCommand
 } from "@earendil-works/pi-tui";
+import { AltScreenSearchComponent } from "@earendil-works/pi-tui/dist/alt-screen-search.js";
 
 import {
   attachmentSummary,
@@ -130,6 +133,7 @@ import {
   type NotificationCondition,
   type NotificationMethod,
   type NotificationSettings,
+  type TerminalFocusState,
   type TurnNotificationKind
 } from "./notifications.ts";
 import { watchStreamErrors } from "./stream-error-guard.ts";
@@ -230,7 +234,7 @@ import {
 import { createTheme, type ZCodeTheme } from "./theme.ts";
 import { StatusLine, type StatusLineField } from "./status-line.ts";
 import { SystemEventView, type SystemEventData } from "./system-event-view.ts";
-import { sanitizeTerminalText } from "./terminal-text.ts";
+import { sanitizeTerminalText, stripCaretHighlight } from "./terminal-text.ts";
 import { ThinkingView } from "./thinking-view.ts";
 import { ToolGroupView } from "./tool-group-view.ts";
 import { ToolTreeView } from "./tool-tree-view.ts";
@@ -546,6 +550,21 @@ class ZCodeAltScreen extends TuiAltScreen {
     this.currentInput = data;
   }
 
+  override showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
+    // pi-tui constructs its search Input internally. Decorate only that
+    // overlay, before compositing, so transcript matches and selections retain
+    // their inverse styles. The caret is also drawn when the search has lost
+    // keyboard focus to the editor and no longer emits a cursor marker.
+    if (component instanceof AltScreenSearchComponent) {
+      const render = component.render.bind(component);
+      component.render = (width) => {
+        const lines = render(width);
+        return this.getShowHardwareCursor() ? lines : lines.map(stripCaretHighlight);
+      };
+    }
+    return super.showOverlay(component, options);
+  }
+
   /**
    * The terminal can lose visible rows while this process is unfocused even
    * though pi-tui's logical frame remains unchanged. Invalidate its
@@ -667,6 +686,7 @@ class ZCodeTui {
   private executionStateRevision = 0;
   private model: string;
   private tuiMode: TuiMode;
+  private terminalFocus: TerminalFocusState = "unknown";
   private copyOnSelect = true;
   private thoughtLevel?: string;
   private modelOptions: unknown[];
@@ -767,7 +787,10 @@ class ZCodeTui {
     this.ui = this.createTui(this.tuiMode);
     this.notifications = new TurnNotifier({
       writeTerminal: (data) => this.ui.terminal.write(data),
-      focusReportingRequired: this.tuiMode === "fullscreen"
+      onFocusChange: (state) => {
+        this.terminalFocus = state;
+        this.applyTerminalFocus();
+      }
     });
     this.status = new StatusLine();
     this.turnStatus = new FooterBar();
@@ -842,7 +865,6 @@ class ZCodeTui {
       if (effective !== this.tuiMode) {
         this.ui = this.createTui(effective);
         this.tuiMode = effective;
-        this.notifications.setFocusReportingRequired(effective === "fullscreen");
         this.editor = this.createEditor(this.ui);
       }
     } catch {
@@ -984,6 +1006,18 @@ class ZCodeTui {
   private setCopyOnSelect(enabled: boolean): void {
     this.copyOnSelect = enabled;
     this.fullscreenAltScreen?.setCopyOnSelect(enabled);
+  }
+
+  /**
+   * Mirror terminal focus onto the hardware cursor so multiplexer panes
+   * (tmux/windows-style splits) only show a live cursor in the focused pane;
+   * the state flip also schedules the render that re-evaluates the drawn
+   * carets (editor and prompt inputs read isTerminalFocused at render time).
+   * "unknown" keeps the cursor visible; terminals without focus reports
+   * (mode 1004) never report focus loss in the first place.
+   */
+  private applyTerminalFocus(): void {
+    this.ui.setShowHardwareCursor(this.terminalFocus !== "unfocused");
   }
 
   private createTui(mode: TuiMode): TUI {
@@ -1160,6 +1194,7 @@ class ZCodeTui {
     editor.planEnabled = this.planEnabled;
     editor.planColor = this.theme.accent;
     editor.hintColor = this.theme.muted;
+    editor.isTerminalFocused = () => this.terminalFocus !== "unfocused";
     if (this.options.locale?.startsWith("zh")) editor.planHint = "先调研与规划，再开始修改";
     for (const input of [...this.editorHistory].reverse()) editor.addToHistory(input);
     const commands = this.autocompleteCommands();
@@ -1209,7 +1244,6 @@ class ZCodeTui {
       this.ui.stop({ preserveScreen: true });
       this.ui = this.createTui(next);
       this.tuiMode = next;
-      this.notifications.setFocusReportingRequired(next === "fullscreen");
       this.sessionHasContent = hadSessionContent;
       this.fullscreenWelcomeVisible = !hadSessionContent;
       this.fullscreenHeader.setPhase(hadSessionContent ? "rail" : "welcome");
@@ -1223,6 +1257,7 @@ class ZCodeTui {
       if (savedDraft) this.editor.setText(savedDraft);
       this.ui.requestRender(true);
       this.notifications.start();
+      this.applyTerminalFocus();
       try {
         await writeTuiMode(next);
       } catch (error) {
@@ -1239,7 +1274,6 @@ class ZCodeTui {
         }
         this.ui = previousUi;
         this.tuiMode = previousMode;
-        this.notifications.setFocusReportingRequired(previousMode === "fullscreen");
         this.sessionHasContent = hadSessionContent;
         this.fullscreenWelcomeVisible = previousMode === "fullscreen" ? !hadSessionContent : true;
         this.fullscreenHeader.setPhase(hadSessionContent ? "rail" : "welcome");
@@ -1253,6 +1287,7 @@ class ZCodeTui {
           this.bindInput();
           this.focusEditor();
           this.notifications.start();
+          this.applyTerminalFocus();
           this.ui.requestRender(true);
         } catch {
           // Preserve the original switch failure in the user-facing notice.
@@ -1338,6 +1373,7 @@ class ZCodeTui {
       if (!this.stopped) {
         this.ui.start();
         this.notifications.start();
+        this.applyTerminalFocus();
         this.focusEditor();
         this.ui.requestRender(true);
       }
@@ -5360,7 +5396,10 @@ class ZCodeTui {
   private async showTextPrompt(options: Parameters<typeof promptText>[3]): Promise<string | null> {
     this.choiceDepth += 1;
     try {
-      return await promptText(this.ui, this.choiceHost, this.theme, options);
+      return await promptText(this.ui, this.choiceHost, this.theme, {
+        ...options,
+        isTerminalFocused: () => this.terminalFocus !== "unfocused"
+      });
     } finally {
       this.choiceDepth = Math.max(0, this.choiceDepth - 1);
       if (this.choiceDepth === 0) this.focusEditor();
