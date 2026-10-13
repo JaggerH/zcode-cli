@@ -26,6 +26,8 @@ export { hasRuntimeResolvedContextWindow, patchRuntimeResolvedContextWindow } fr
 import { patchRuntimeWorkflowManagement } from "./runtime-workflow-patches.ts";
 export { patchRuntimeWorkflowManagement } from "./runtime-workflow-patches.ts";
 export { hasRuntimeConfigurationDiagnostics, patchRuntimeConfigurationDiagnostics } from "./runtime-config-diagnostic-patches.ts";
+import { hasRuntimeBuiltinProviderEnvRecovery, patchRuntimeBuiltinProviderEnvRecovery } from "./runtime-provider-env-patches.ts";
+export { hasRuntimeBuiltinProviderEnvRecovery, patchRuntimeBuiltinProviderEnvRecovery } from "./runtime-provider-env-patches.ts";
 import {
   hasRuntimeSqliteBusyTimeout, hasRuntimeSqliteWriteRecovery,
   patchRuntimeSqliteBusyTimeout, patchRuntimeSqliteWriteRecovery
@@ -1731,6 +1733,10 @@ export const runtimePatchPlan: readonly RuntimePatchDefinition[] = [
     requirement: "required",
     apply: patchRuntimeCliSettingsFile,
     verify: hasRuntimeCliSettingsFile
+  },
+  {
+    id: "builtin-provider-env-recovery", requirement: "required", apply: patchRuntimeBuiltinProviderEnvRecovery,
+    verify: hasRuntimeBuiltinProviderEnvRecovery
   },
   {
     id: "configuration-diagnostics", requirement: "required", apply: patchRuntimeConfigurationDiagnostics,
