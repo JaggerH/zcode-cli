@@ -1059,7 +1059,9 @@ export function patchRuntimeSessionModelRecovery(runtime: string): string {
   const marker = "$zRestoredSessionModel";
   if (runtime.includes(marker) && runtime.includes('"readSessionModelState"')) return runtime;
   const facade = /getModelOption:([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)=>[A-Za-z_$][\w$]*\(([A-Za-z_$][\w$]*)\.providerRegistry,\2\),"getModelOption"\)/u.exec(runtime);
-  const restore = /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.validateSelection\(\2\);return (?:[^;]*?,)?([A-Za-z_$][\w$]*)\(\)\.setSessionModelSelection\(\1\?\.ok\?\2:void 0\),\2\},"restorePersistedModelSelection"/u.exec(runtime);
+  // 0.17.0 restores the persisted selection and mirrors it into both the
+  // runtime and the CLI default used by cli-default prompt admission.
+  const restore = /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.validateSelection\(\2\);return (?:[^;]*?,)?([A-Za-z_$][\w$]*)\(\)\.setSessionModelSelection\(\1\?\.ok\?\2:void 0\),[A-Za-z_$][\w$]*\?\.set\([^)]*\),\2\},"restorePersistedModelSelection"/u.exec(runtime);
   const boundary = /([A-Za-z_$][\w$]*)\(async ([A-Za-z_$][\w$]*)=>\{await ([A-Za-z_$][\w$]*)\.prepareUserExecutionBoundary\(\2\)\},"preparePromptBoundary"\)/u.exec(runtime);
   if (!facade || !restore || !boundary) throw new Error("ZCode runtime is incompatible with session model recovery (restore/facade anchors missing).");
   const helper = 'require(require("node:path").join(__dirname,"cli-config.cjs"))';
@@ -1067,7 +1069,7 @@ export function patchRuntimeSessionModelRecovery(runtime: string): string {
   return runtime
     .replace(facade[0], `${facade[0]},readSessionModelState:${facade[1]}(async()=>await ${helper}.readSessionModelState({registry:${context}.providerRegistry,sessionStore:${context}.sessionStore,sessionId:${context}.sessionId}),"readSessionModelState")`)
     .replace(restore[0], restore[0].replace(";return ", `;${getRuntime}.${marker}={selection:${restore[2]},registry:${restore[3]}};return `))
-    .replace(boundary[0], boundary[0].replace('},"preparePromptBoundary")', `;${helper}.assertSessionModelReady({registry:${inputContext}.runtime.${marker}?.registry,sessionId:${inputContext}.sessionId,currentSelection:${inputOptions}?.intent?.modelSelection??${inputContext}.runtime.getSessionModelSelection(),restored:${inputContext}.runtime.${marker}})},"preparePromptBoundary")`));
+    .replace(boundary[0], boundary[0].replace('},"preparePromptBoundary")', `;${helper}.assertSessionModelReady({registry:${inputContext}.runtime.${marker}?.registry,sessionId:${inputContext}.sessionId,currentSelection:${inputOptions}?.intent?.modelSelection??${inputContext}.cliDefaultSelection?.get?.()??${inputContext}.runtime.getSessionModelSelection(),restored:${inputContext}.runtime.${marker}})},"preparePromptBoundary")`));
 }
 
 export function patchRuntimeTuiExecutionState(runtime: string): string {
@@ -1388,13 +1390,24 @@ export function patchRuntimeStreamEofFinishGuard(runtime: string): string {
   return patched;
 }
 
+const restoredPromptModelSwitch = /([A-Za-z_$][\w$]*)\.cliDefaultSelection&&\(([A-Za-z_$][\w$]*)\?\.cliDefault&&await \1\.prepareResume\(\),!\2\?\.transient\|\|\2\?\.cliDefault\)\?/u;
+
 export function patchRuntimePromptModel(runtime: string): string {
-  if (runtime.includes("ZCODE_CLI_PROMPT_MODEL")) return runtime;
+  const marker = "$zCliDefaultPromptModel";
+  if (runtime.includes(marker) && restoredPromptModelSwitch.test(runtime)) return runtime;
   const anchor = /if\([A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\.traceId,[A-Za-z_$][\w$]*\.memoryBench/u.exec(runtime);
   if (!anchor) throw new Error("ZCode runtime is incompatible with the prompt model patch.");
-  return runtime.slice(0, anchor.index)
-    + `if(process.env.ZCODE_CLI_PROMPT_MODEL)await ${anchor[1]}.setModel(process.env.ZCODE_CLI_PROMPT_MODEL,{transient:true});`
-    + runtime.slice(anchor.index);
+  // cli-default prompt admission reads CliDefaultSelection, not the runtime
+  // selection. A transient --model override must update that default without
+  // persisting a session model change.
+  const switchAnchor = /([A-Za-z_$][\w$]*)\.cliDefaultSelection&&(?:!([A-Za-z_$][\w$]*)\?\.transient|\(!([A-Za-z_$][\w$]*)\?\.transient\|\|\3\?\.cliDefault\))\?/u.exec(runtime);
+  if (!switchAnchor) throw new Error("ZCode runtime is incompatible with the prompt model patch (cli-default selection anchor missing).");
+  const insertion = `let ${marker}=process.env.ZCODE_CLI_PROMPT_MODEL;if(${marker})await ${anchor[1]}.setModel(${marker},{transient:true,cliDefault:true});`;
+  let patched = runtime.includes(marker) ? runtime : runtime.slice(0, anchor.index) + insertion + runtime.slice(anchor.index);
+  const context = switchAnchor[1];
+  const options = switchAnchor[2] ?? switchAnchor[3];
+  patched = patched.replace(switchAnchor[0], `${context}.cliDefaultSelection&&(${options}?.cliDefault&&await ${context}.prepareResume(),!${options}?.transient||${options}?.cliDefault)?`);
+  return patched;
 }
 
 const cliSettingsOverride = "process.env.ZCODE_CLI_SETTINGS_FILE?.trim()";
@@ -1676,7 +1689,9 @@ export function patchRuntimeLoginModelDefaults(runtime: string): string {
     const input = prefix[1];
     let patched = runtime.includes("let $zConfiguredDefault=") ? runtime : runtime.replace(prefix[0], `${prefix[0]}if(${input}.configuredDefault&&!${input}.configuredDefault.options?.reasoningLevel){let $zConfiguredDefault=${complete}(${input}.registry,${input}.configuredDefault);if($zConfiguredDefault)${input}={...${input},configuredDefault:{...${input}.configuredDefault,options:{...${input}.configuredDefault.options,...$zConfiguredDefault.options}}}}`);
     if (!patched.includes("let $zSelectedModel=")) {
-      const setter = /return ([A-Za-z_$][\w$]*)\.runtime\.setSessionModelSelection\(([A-Za-z_$][\w$]*)\),[A-Za-z_$][\w$]*\?\.transient/u.exec(patched);
+      // 0.17.0 routes non-transient switches through CliDefaultSelection. Keep
+      // the reasoning-level completion ahead of that ternary.
+      const setter = /return ([A-Za-z_$][\w$]*)\.cliDefaultSelection&&[^{};]*?\1\.cliDefaultSelection\.set\(([A-Za-z_$][\w$]*)\):\1\.runtime\.setSessionModelSelection\(\2\),[A-Za-z_$][\w$]*\?\.transient/u.exec(patched);
       if (!setter) throw new Error("ZCode runtime is incompatible with login model defaults (registry model switch anchor missing).");
       const [, context, selection] = setter;
       patched = patched.replace(setter[0], `if(!${selection}.options?.reasoningLevel){let $zSelectedModel=${complete}(${context}.providerRegistry.getView(),${selection});if($zSelectedModel)${selection}={...${selection},options:{...${selection}.options,...$zSelectedModel.options}}}${setter[0]}`);
@@ -1840,7 +1855,8 @@ export const runtimePatchPlan: readonly RuntimePatchDefinition[] = [
     id: "prompt-model",
     requirement: "required",
     apply: patchRuntimePromptModel,
-    verify: (runtime) => runtime.includes("ZCODE_CLI_PROMPT_MODEL")
+    verify: (runtime) => runtime.includes("$zCliDefaultPromptModel") && runtime.includes("cliDefault:true")
+      && restoredPromptModelSwitch.test(runtime)
   },
   {
     id: "bigmodel-oauth",
