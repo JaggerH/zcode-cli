@@ -438,10 +438,11 @@ TUI 会把被拒绝的输入放回空编辑器，或保留在后续输入队列�
 ZCODE_MODEL_RETRY_MAX_RETRIES=3 zcode
 ```
 
-原生 `Stop` hook 只在模型回合正常结束时运行，不能处理最终被 429／服务过载中断的回合。
-交互式 TUI 可设置 `ZCODE_TUI_AUTO_CONTINUE_ON_RATE_LIMIT=1`：运行时耗尽重试后，
+原生 `Stop` hook 只在模型回合正常结束时运行，不能处理最终被服务过载中断的回合。
+交互式 TUI 可设置 `ZCODE_TUI_AUTO_CONTINUE_ON_OVERLOAD=1`：运行时耗尽重试且失败原因
+为 `provider_overloaded` 后，
 等待 30 秒，再向同一会话自动发送一次“继续”。可用
-`ZCODE_TUI_RATE_LIMIT_CONTINUE_DELAY_MS` 调整等待时间，上限为 60 秒。
+`ZCODE_TUI_OVERLOAD_CONTINUE_DELAY_MS` 调整等待时间，上限为 60 秒。普通限流不会触发。
 若用户已输入草稿、排队了新消息、切换了会话或关闭 TUI，则跳过自动消息；自动续接本身
 再次失败时不会循环发送。单次 `--prompt` 命令不使用这个 TUI 处理器。
 

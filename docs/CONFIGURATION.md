@@ -542,10 +542,11 @@ streams, rate limits and server/network errors are retried and shown in the
 TUI. Authentication and invalid-request responses remain non-retryable.
 
 The native `Stop` hook runs after a successful model turn, so it cannot recover
-a turn that ends with 429 or provider overload. For interactive TUI sessions,
-set `ZCODE_TUI_AUTO_CONTINUE_ON_RATE_LIMIT=1` to send one continuation message
-to the same session after the runtime exhausts its retries. The TUI waits 30
-seconds before sending it; `ZCODE_TUI_RATE_LIMIT_CONTINUE_DELAY_MS` changes that
+a turn that ends with provider overload. For interactive TUI sessions,
+set `ZCODE_TUI_AUTO_CONTINUE_ON_OVERLOAD=1` to send one continuation message
+to the same session after the runtime exhausts its retries on a
+`provider_overloaded` failure. A plain rate limit does not trigger it. The TUI waits 30
+seconds before sending it; `ZCODE_TUI_OVERLOAD_CONTINUE_DELAY_MS` changes that
 wait, up to 60 seconds. It skips the message if you have entered a draft,
 queued another input, changed sessions, or closed the TUI. A continuation that
 also fails does not trigger another automatic message. Headless `--prompt`

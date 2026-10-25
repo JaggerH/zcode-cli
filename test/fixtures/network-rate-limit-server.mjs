@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 let streamingRequests = 0;
 const status = Number(process.env.ZCODE_TEST_REJECT_STATUS || 429);
 const rejectCount = Number(process.env.ZCODE_TEST_REJECT_COUNT || 1);
+const businessCode = process.env.ZCODE_TEST_BUSINESS_CODE;
 const server = createServer(async (request, response) => {
   let body = "";
   for await (const chunk of request) body += chunk.toString();
@@ -23,7 +24,10 @@ const server = createServer(async (request, response) => {
   process.stdout.write(`REQUEST ${streamingRequests}\n`);
   if (streamingRequests <= rejectCount) {
     response.writeHead(status, { "content-type": "application/json", "retry-after": "0" });
-    response.end(JSON.stringify({ error: { message: status === 429 ? "rate limit" : "provider overloaded" } }));
+    response.end(JSON.stringify({ error: {
+      ...(businessCode ? { code: businessCode } : {}),
+      message: businessCode === "1312" ? "Provider overloaded" : status === 429 ? "rate limit" : "provider overloaded"
+    } }));
     return;
   }
   response.writeHead(200, { "content-type": "text/event-stream" });

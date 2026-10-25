@@ -251,6 +251,26 @@ test("exhausted rate limits expose a failed turn after the bounded attempts", as
   });
 }, 30_000);
 
+test("Start Plan overload business code remains distinct from a plain 429", async () => {
+  const run = await runNetworkFixture({
+    fixture: "network-rate-limit-server.mjs",
+    keepAlive: false,
+    modelRetries: 1,
+    providerName: "Overload fixture",
+    serverEnv: {
+      ZCODE_TEST_REJECT_STATUS: "429",
+      ZCODE_TEST_REJECT_COUNT: "4",
+      ZCODE_TEST_BUSINESS_CODE: "1312"
+    },
+    temporaryPrefix: "zcode-overload-exhausted-"
+  });
+  expect(run.code).not.toBe(0);
+  const failedTurn = run.output.find(entry => entry.type === "turn.failed");
+  expect(failedTurn?.payload?.error).toMatchObject({
+    attribution: { source: "provider", reason: "provider_overloaded", statusCode: 429, retryable: true }
+  });
+}, 30_000);
+
 test("recovers a graceful mid-stream EOF that never reports a finish reason", async () => {
   const run = await runNetworkFixture({
     fixture: "network-eof-server.mjs",

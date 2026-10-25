@@ -139,7 +139,7 @@ import {
   type TurnNotificationKind
 } from "./notifications.ts";
 import { watchStreamErrors } from "./stream-error-guard.ts";
-import { isTerminalRateLimitFailure, rateLimitContinuationDelay, rateLimitContinuationPrompt } from "./rate-limit-continuation.ts";
+import { isTerminalProviderOverload, providerOverloadContinuationDelay, providerOverloadContinuationPrompt } from "./provider-overload-continuation.ts";
 import { stopTui } from "./terminal-cleanup.ts";
 import {
   readTuiMode,
@@ -665,9 +665,9 @@ class ZCodeTui {
   private activeTurnId?: string;
   private turnEpoch = 0;
   private activeTurnEpoch?: number;
-  private rateLimitContinuationRemaining = 1;
-  private lastHandledRateLimitFailure?: string;
-  private pendingRateLimitContinuation?: { sessionId?: string; ready: boolean; timer: ReturnType<typeof setTimeout> };
+  private providerOverloadContinuationRemaining = 1;
+  private lastHandledProviderOverload?: string;
+  private pendingProviderOverloadContinuation?: { sessionId?: string; ready: boolean; timer: ReturnType<typeof setTimeout> };
   private modelStatusBlockId?: string;
   private pendingSteerInterrupt?: PendingSteerInterrupt;
   private recentSteerCommit?: { at: number; turnEpoch: number };
@@ -1624,9 +1624,9 @@ class ZCodeTui {
   private async submit(rawInput: string, queuedSubmission?: QueuedSubmission): Promise<boolean | undefined> {
     const input = (queuedSubmission?.input ?? rawInput).trim();
     if (!input || this.stopped) return false;
-    if (!queuedSubmission?.rateLimitContinuation) {
-      this.cancelRateLimitContinuation();
-      this.rateLimitContinuationRemaining = 1;
+    if (!queuedSubmission?.providerOverloadContinuation) {
+      this.cancelProviderOverloadContinuation();
+      this.providerOverloadContinuationRemaining = 1;
     }
     const submission = queuedSubmission ?? protectSubmission(input);
     if (!input.startsWith("/") && !this.primaryTurnActive) {
@@ -2071,7 +2071,7 @@ class ZCodeTui {
       }
     }
     this.finishTurn(turnFinishState);
-    this.maybeSendRateLimitContinuation();
+    this.maybeSendProviderOverloadContinuation();
     return nextCommand;
   }
 
@@ -2328,7 +2328,7 @@ class ZCodeTui {
     if (turnEpoch !== undefined && turnEpoch !== this.activeTurnEpoch) return;
     const event = normalizeEvent(value);
     if (!event || this.isForeignSessionEvent(event)) return;
-    this.observeRateLimitFailure(event);
+    this.observeProviderOverload(event);
     if (runtimeContextRefreshNeeded(event)) this.runtimeContextCache.invalidate();
     if (this.handleDynamicWorkflowEvent(value, event.type)) return;
     const taskScoped = this.backgroundTaskEvents.isTaskScoped(event);
@@ -2514,7 +2514,7 @@ class ZCodeTui {
     this.debugEvent("session-subscription", value);
     const event = normalizeEvent(value);
     if (!event || this.isForeignSessionEvent(event)) return;
-    this.observeRateLimitFailure(event);
+    this.observeProviderOverload(event);
     if (runtimeContextRefreshNeeded(event)) this.runtimeContextCache.invalidate();
     if (this.handleDynamicWorkflowEvent(value, event.type)) return;
     this.applyBackgroundTaskEvent(event);
@@ -2526,38 +2526,38 @@ class ZCodeTui {
     return Boolean(sessionId && event.sessionId && event.sessionId !== sessionId);
   }
 
-  private observeRateLimitFailure(event: StreamEvent): void {
+  private observeProviderOverload(event: StreamEvent): void {
     const failureId = event.turnId ?? event.inputId ?? event.eventId;
-    if (process.env.ZCODE_TUI_AUTO_CONTINUE_ON_RATE_LIMIT !== "1"
-      || this.rateLimitContinuationRemaining < 1 || this.pendingRateLimitContinuation
-      || (failureId !== undefined && failureId === this.lastHandledRateLimitFailure)
-      || !isTerminalRateLimitFailure(event)) return;
-    this.rateLimitContinuationRemaining -= 1;
-    this.lastHandledRateLimitFailure = failureId;
+    if (process.env.ZCODE_TUI_AUTO_CONTINUE_ON_OVERLOAD !== "1"
+      || this.providerOverloadContinuationRemaining < 1 || this.pendingProviderOverloadContinuation
+      || (failureId !== undefined && failureId === this.lastHandledProviderOverload)
+      || !isTerminalProviderOverload(event)) return;
+    this.providerOverloadContinuationRemaining -= 1;
+    this.lastHandledProviderOverload = failureId;
     const sessionId = event.sessionId ?? this.options.getMainSessionId?.() ?? this.sessionId;
     const pending = { sessionId, ready: false, timer: undefined as unknown as ReturnType<typeof setTimeout> };
     pending.timer = setTimeout(() => {
-      if (this.pendingRateLimitContinuation !== pending) return;
+      if (this.pendingProviderOverloadContinuation !== pending) return;
       pending.ready = true;
-      this.maybeSendRateLimitContinuation();
-    }, rateLimitContinuationDelay(process.env));
-    this.pendingRateLimitContinuation = pending;
-    this.addNotice("Provider rate limit exhausted; continuing this conversation after a short wait…", "warning");
+      this.maybeSendProviderOverloadContinuation();
+    }, providerOverloadContinuationDelay(process.env));
+    this.pendingProviderOverloadContinuation = pending;
+    this.addNotice("Provider overload exhausted retries; continuing this conversation after a short wait…", "warning");
   }
 
-  private maybeSendRateLimitContinuation(): void {
-    const pending = this.pendingRateLimitContinuation;
+  private maybeSendProviderOverloadContinuation(): void {
+    const pending = this.pendingProviderOverloadContinuation;
     if (!pending?.ready || this.stopped || this.primaryTurnActive || this.activeSubmissions > 0) return;
     const currentSessionId = this.options.getMainSessionId?.() ?? this.sessionId;
     if ((pending.sessionId && currentSessionId && pending.sessionId !== currentSessionId)
       || this.inputQueue.hasFollowUps() || this.editor.getText().trim()) {
-      this.cancelRateLimitContinuation();
+      this.cancelProviderOverloadContinuation();
       return;
     }
-    this.pendingRateLimitContinuation = undefined;
-    void this.submit(rateLimitContinuationPrompt, {
-      ...protectSubmission(rateLimitContinuationPrompt),
-      rateLimitContinuation: true,
+    this.pendingProviderOverloadContinuation = undefined;
+    void this.submit(providerOverloadContinuationPrompt, {
+      ...protectSubmission(providerOverloadContinuationPrompt),
+      providerOverloadContinuation: true,
       recordHistory: false,
       suppressCompletionNotification: true
     }).catch((error: unknown) => {
@@ -2565,9 +2565,9 @@ class ZCodeTui {
     });
   }
 
-  private cancelRateLimitContinuation(): void {
-    if (this.pendingRateLimitContinuation) clearTimeout(this.pendingRateLimitContinuation.timer);
-    this.pendingRateLimitContinuation = undefined;
+  private cancelProviderOverloadContinuation(): void {
+    if (this.pendingProviderOverloadContinuation) clearTimeout(this.pendingProviderOverloadContinuation.timer);
+    this.pendingProviderOverloadContinuation = undefined;
   }
 
   private handleDynamicWorkflowEvent(value: unknown, type: string | undefined): boolean {
@@ -6151,7 +6151,7 @@ class ZCodeTui {
     if (this.fullscreenWelcomeTransitionTimer) clearTimeout(this.fullscreenWelcomeTransitionTimer);
     if (this.runtimeRefreshTimer) clearTimeout(this.runtimeRefreshTimer);
     if (this.runtimePollTimer) clearTimeout(this.runtimePollTimer);
-    this.cancelRateLimitContinuation();
+    this.cancelProviderOverloadContinuation();
     this.unsubscribeSession?.();
     this.unsubscribeWorkflow?.();
     const elapsedMilliseconds = this.turnStartedAt === undefined
