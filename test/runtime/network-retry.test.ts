@@ -220,6 +220,20 @@ test("recovers a real partial SSE connection reset without concatenating attempt
   expect(result?.response).not.toContain("PARTIAL_SHOULD_BE_DISCARDED");
 }, 30_000);
 
+test.each([429, 503])("retries a provider HTTP %i before ending the turn", async (status) => {
+  const run = await runNetworkFixture({
+    fixture: "network-rate-limit-server.mjs",
+    modelRetries: 2,
+    providerName: "Rate limit fixture",
+    serverEnv: { ZCODE_TEST_REJECT_STATUS: String(status) },
+    temporaryPrefix: "zcode-rate-limit-"
+  });
+  const result = run.output.findLast((entry) => entry.type === "result");
+  expect(run.code, run.diagnostics).toBe(0);
+  expect(run.requestCount, run.stdout).toBe(2);
+  expect(result?.response).toBe("RECOVERED_FINAL");
+}, 30_000);
+
 test("recovers a graceful mid-stream EOF that never reports a finish reason", async () => {
   const run = await runNetworkFixture({
     fixture: "network-eof-server.mjs",
