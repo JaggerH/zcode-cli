@@ -274,8 +274,9 @@ Provider 文件中的 `config.defaultModelSelection` 决定新会话使用的模
 仓库。桌面端模型目录和版本可分别通过 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` 和
 `ZCODE_APP_VERSION` 指定。CLI 设置和模型选择仍保存在 WSL 端，除非另行覆盖其路径。
 
-- **macOS 上的 Z.AI OAuth：** 使用 `zcode login`；`zcode login --oauth` 强制重新授权。
-  `--no-browser` 只输出授权链接。
+- **Z.AI 浏览器 OAuth：** 使用 `zcode login`；`zcode login --oauth` 强制重新授权。
+  `--no-browser` 只输出授权链接。Linux 和 Windows 使用运行时的 HTTPS 回调，macOS
+  使用已注册的 `zcode://` 回调。
 - **Z.AI／BigModel Coding Plan API Key：** 打开 `/login`，选择掩码输入的 API Key 选项。
   凭证和 provider 的保存由官方 runtime 负责。
 - **BigModel 浏览器 OAuth：** 在 `/login` 中选择 **BigModel Coding Plan**，或运行

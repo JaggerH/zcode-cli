@@ -322,8 +322,9 @@ configuration. The Desktop catalog path and app version can be set with
 still uses its own CLI settings and provider selection unless their paths are
 overridden separately.
 
-- **Z.AI OAuth on macOS:** use `zcode login`, or `zcode login --oauth` to force
-  authorization. `--no-browser` prints the authorization URL.
+- **Z.AI browser OAuth:** use `zcode login`, or `zcode login --oauth` to force
+  authorization. `--no-browser` prints the authorization URL. Linux and Windows
+  use the runtime's HTTPS callback; macOS uses the registered `zcode://` callback.
 - **Z.AI/BigModel Coding Plan API key:** open `/login` and choose the masked
   API-key option. The official runtime owns credential and provider persistence.
 - **BigModel browser OAuth:** choose **BigModel Coding Plan** in `/login`, or run
