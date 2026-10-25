@@ -264,6 +264,16 @@ Provider 文件中的 `config.defaultModelSelection` 决定新会话使用的模
 
 ## 模型访问
 
+当前 Z.AI 账号有有效 Start Plan 且对应模型仍有余额时，`/model` 会显示
+`account:zai-start-plan/<模型>`。CLI 在列出模型以及每次请求前向 ZCode 核对套餐与
+模型权限，并自动取得请求所需的验证码参数。登录失效、套餐过期、余额用尽或验证失败时
+会报错，不会悄悄改用其他 provider。
+
+在 WSL 使用 Windows 端的登录状态时，把 `ZCODE_CLI_CREDENTIALS_FILE` 指向 Windows
+端的 `credentials.json`，并提供与其匹配的 `ZCODE_CREDENTIAL_SECRET`；不要把密钥写入
+仓库。桌面端模型目录和版本可分别通过 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` 和
+`ZCODE_APP_VERSION` 指定。CLI 设置和模型选择仍保存在 WSL 端，除非另行覆盖其路径。
+
 - **macOS 上的 Z.AI OAuth：** 使用 `zcode login`；`zcode login --oauth` 强制重新授权。
   `--no-browser` 只输出授权链接。
 - **Z.AI／BigModel Coding Plan API Key：** 打开 `/login`，选择掩码输入的 API Key 选项。

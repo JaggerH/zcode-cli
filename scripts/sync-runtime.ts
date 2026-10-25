@@ -18,6 +18,7 @@ import { hasRuntimeSessionLifecycle, patchRuntimeSessionLifecycle } from "./runt
 export { hasRuntimeSessionLifecycle, patchRuntimeSessionLifecycle } from "./runtime-session-lifecycle-patches.ts";
 import { hasRuntimeBigmodelOAuth, patchRuntimeBigmodelOAuth } from "./runtime-bigmodel-oauth-patches.ts";
 import { hasRuntimeSharedOAuth, patchRuntimeSharedOAuth } from "./runtime-shared-oauth-patches.ts";
+import { hasRuntimeStartPlan, patchRuntimeStartPlan } from "./runtime-start-plan-patches.ts";
 export { hasRuntimeSharedOAuth, patchRuntimeSharedOAuth } from "./runtime-shared-oauth-patches.ts";
 export { hasRuntimeBigmodelOAuth, patchRuntimeBigmodelOAuth } from "./runtime-bigmodel-oauth-patches.ts";
 import { hasRuntimeBrowserUrlOpening, patchRuntimeBrowserUrlOpening } from "./runtime-browser-patches.ts";
@@ -1682,6 +1683,7 @@ async function installLocalTui(nextVendor: string): Promise<void> {
   await cp(join(source, "package.json"), join(target, "package.json"));
   await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
   await cp(join(root, "bin", "runtime-config.cjs"), join(nextVendor, "cli-config.cjs"));
+  await cp(join(root, "bin", "start-plan-captcha.cjs"), join(nextVendor, "start-plan-captcha.cjs"));
 }
 
 /** Align Coding Plan defaults without depending on platform-specific minifier names. */
@@ -1901,6 +1903,10 @@ export const runtimePatchPlan: readonly RuntimePatchDefinition[] = [
     verify: hasRuntimeSharedOAuth
   },
   {
+    id: "start-plan", requirement: "required", apply: patchRuntimeStartPlan,
+    verify: hasRuntimeStartPlan
+  },
+  {
     id: "login-model-defaults",
     requirement: "required",
     apply: patchRuntimeLoginModelDefaults
@@ -1998,6 +2004,14 @@ async function extractWith7Zip(
   output: string,
   platform: SyncOptions["platform"]
 ): Promise<string> {
+  // WSL distributions commonly have dpkg-deb but not 7z; both extract the
+  // same Debian payload, and the lock digest was checked before this step.
+  if (platform === "linux" && !Bun.which("7z") && Bun.which("dpkg-deb")) {
+    const destination = join(output, "root");
+    await mkdir(destination, { recursive: true });
+    await run("dpkg-deb", ["-x", archive, destination]);
+    return destination;
+  }
   const first = join(output, "stage-1");
   await mkdir(first, { recursive: true });
   await run("7z", ["x", archive, `-o${first}`, "-y"]);

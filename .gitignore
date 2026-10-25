@@ -3,6 +3,7 @@ vendor/
 packages/zcode-tui/dist/
 bin/zcode.js
 bin/runtime-config.cjs
+bin/start-plan-captcha.cjs
 .vendor-next/
 .release/
 .zcode/

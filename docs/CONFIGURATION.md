@@ -306,6 +306,22 @@ provider configuration is recognized directly; no desktop import step is needed.
 
 ## Model access
 
+An active Z.AI Start Plan appears in `/model` as
+`account:zai-start-plan/<model>` when the shared OAuth login has remaining
+model balance. The CLI checks the plan and model entitlement with ZCode before
+listing it and again before each request. Start Plan requests obtain ZCode's
+CAPTCHA verification parameter automatically. A missing login, expired plan,
+empty balance or failed verification produces an error rather than silently
+using another provider.
+
+In WSL, point `ZCODE_CLI_CREDENTIALS_FILE` at the Windows ZCode
+`credentials.json` if that is where you signed in. The CLI must also receive
+the matching `ZCODE_CREDENTIAL_SECRET`; keep that value out of checked-in
+configuration. The Desktop catalog path and app version can be set with
+`ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` and `ZCODE_APP_VERSION`. The WSL user
+still uses its own CLI settings and provider selection unless their paths are
+overridden separately.
+
 - **Z.AI OAuth on macOS:** use `zcode login`, or `zcode login --oauth` to force
   authorization. `--no-browser` prints the authorization URL.
 - **Z.AI/BigModel Coding Plan API key:** open `/login` and choose the masked

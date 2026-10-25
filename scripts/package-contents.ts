@@ -2,6 +2,7 @@ export const attributionFiles = [
   "docs/THIRD_PARTY_CONTENT.md",
   "LICENSES/Apache-2.0.txt",
   "LICENSES/README.md",
+  "LICENSES/pi-zcode-MIT.txt",
   "LICENSES/ZCode-NOTICE.md",
   "LICENSES/ZCode-THIRD-PARTY-NOTICES.md"
 ];

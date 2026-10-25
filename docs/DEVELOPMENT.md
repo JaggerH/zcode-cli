@@ -7,8 +7,8 @@ For installation as an end user, see the [main README](../README.md).
 
 Use Bun 1.4.1, the version pinned in `packageManager` and CI, for development
 and publishing. Older Bun releases are not part of the validated toolchain.
-The CLI and SQLite tests require Node >=22.19.0. `7z` is needed only when
-downloading and extracting a remote installer.
+The CLI and SQLite tests require Node >=22.19.0. Remote installer extraction
+uses `dpkg-deb` on Linux when `7z` is unavailable; other platforms need `7z`.
 
 ## Quick start
 

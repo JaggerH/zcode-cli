@@ -50,6 +50,7 @@ const requiredFiles = [
   "vendor/node_modules/@zcode/tui/package.json",
   "vendor/zcode.cjs",
   "vendor/cli-config.cjs",
+  "vendor/start-plan-captcha.cjs",
   "vendor/provider/zcode-builtin.json",
   "zcode-runtime.lock.json"
 ];

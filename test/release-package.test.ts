@@ -20,6 +20,7 @@ const requiredPaths = [
   "LICENSE",
   "LICENSES/Apache-2.0.txt",
   "LICENSES/README.md",
+  "LICENSES/pi-zcode-MIT.txt",
   "LICENSES/ZCode-NOTICE.md",
   "LICENSES/ZCode-THIRD-PARTY-NOTICES.md",
   "README.md",
@@ -38,6 +39,7 @@ const requiredPaths = [
   "vendor/node_modules/@zcode/tui/package.json",
   "vendor/zcode.cjs",
   "vendor/cli-config.cjs",
+  "vendor/start-plan-captcha.cjs",
   "vendor/provider/zcode-builtin.json",
   "vendor/packages/documents-plugin/skills/docx/LICENSE.txt",
   "vendor/packages/pdf-plugin/skills/pdf/LICENSE.txt",
@@ -113,7 +115,7 @@ describe("release package", () => {
     expect(packageJson.scripts["release:build"]).toBe("bun scripts/build-release.ts");
     expect(packageJson.scripts["release:pack"]).toBe("bun scripts/pack-release.ts");
     expect(packageJson.scripts.prepack).toBe("bun scripts/check-package.ts --prepack");
-    expect(packageJson.scripts.build).toBe("tsdown");
+    expect(packageJson.scripts.build).toContain("tsdown && bun build node_modules/pi-zcode/src/client/captcha.ts");
     expect(packageJson.scripts["build:launcher"]).toContain("--filter launcher");
     expect(packageJson.scripts["build:tui"]).toContain("--filter tui");
     expect(packageJson.scripts.test).toBe("bun run test:unit");
@@ -236,6 +238,7 @@ describe("release package", () => {
       "docs/THIRD_PARTY_CONTENT.md": "# Fixture documentation\n",
       "LICENSES/Apache-2.0.txt": "license\n",
       "LICENSES/README.md": "notice provenance\n",
+      "LICENSES/pi-zcode-MIT.txt": "pi-zcode license\n",
       "LICENSES/ZCode-NOTICE.md": "upstream notice\n",
       "LICENSES/ZCode-THIRD-PARTY-NOTICES.md": "dependency notices\n",
       "LICENSE": "license",
@@ -274,6 +277,7 @@ describe("release package", () => {
       "vendor/node_modules/@zcode/tui/dist/index.js": "export const value = 1;\n",
       "vendor/node_modules/@zcode/tui/package.json": `${JSON.stringify(tuiPackage)}\n`,
       "vendor/cli-config.cjs": "module.exports={};\n",
+      "vendor/start-plan-captcha.cjs": "module.exports={};\n",
       "vendor/provider/zcode-builtin.json": "{}\n",
       "vendor/zcode.cjs": "console.log('runtime');\n",
       "zcode-runtime.lock.json": `${JSON.stringify(lock)}\n`

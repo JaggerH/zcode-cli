@@ -32,8 +32,9 @@ contents and applicable terms when updating the runtime.
 | Built-in plugin packages | `vendor/packages/*` | Per-package declarations and any nested license files; see below |
 | Bundled npm dependencies | Inside runtime bundles and plugin `node_modules` | Original dependency licenses and notices |
 | Local TUI adapter and configuration bridge | `vendor/node_modules/@zcode/tui`, `vendor/cli-config.cjs` | This project's MIT-licensed code and its dependencies |
+| Start Plan CAPTCHA adapter | `vendor/start-plan-captcha.cjs` | Built from [pi-zcode 0.1.4](https://github.com/xifan2333/pi-zcode), MIT; see [license](../LICENSES/pi-zcode-MIT.txt) |
 | Public launcher | `bin/zcode.js` | This project's MIT-licensed code |
-| Installed npm dependencies | `@earendil-works/pi-tui`, `playwright-core` and their dependencies | Their respective licenses, distributed with those packages |
+| Installed npm dependencies | `@earendil-works/pi-tui`, `playwright-core`, `pi-zcode` and their dependencies | Their respective licenses, distributed with those packages |
 
 The compiled runtime carries a notice identifying local modifications.
 Synchronization retains the existing upstream content and adds compatibility
