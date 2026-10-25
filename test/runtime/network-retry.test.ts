@@ -234,6 +234,23 @@ test.each([429, 503])("retries a provider HTTP %i before ending the turn", async
   expect(result?.response).toBe("RECOVERED_FINAL");
 }, 30_000);
 
+test("exhausted rate limits expose a failed turn after the bounded attempts", async () => {
+  const run = await runNetworkFixture({
+    fixture: "network-rate-limit-server.mjs",
+    keepAlive: false,
+    modelRetries: 1,
+    providerName: "Rate limit fixture",
+    serverEnv: { ZCODE_TEST_REJECT_STATUS: "429", ZCODE_TEST_REJECT_COUNT: "4" },
+    temporaryPrefix: "zcode-rate-limit-exhausted-"
+  });
+  expect(run.code).not.toBe(0);
+  expect(run.requestCount).toBeGreaterThan(1);
+  const failedTurn = run.output.find(entry => entry.type === "turn.failed");
+  expect(failedTurn?.payload?.error).toMatchObject({
+    attribution: { source: "provider", reason: "rate_limited", statusCode: 429, retryable: true }
+  });
+}, 30_000);
+
 test("recovers a graceful mid-stream EOF that never reports a finish reason", async () => {
   const run = await runNetworkFixture({
     fixture: "network-eof-server.mjs",

@@ -126,7 +126,9 @@ package supplies the missing terminal interface and a narrow macOS callback
 bridge for Z.AI's registered Desktop OAuth flow. A compatibility hook in the
 standalone account provider adds Start Plan models after checking the shared
 login and current balance; its request header hook obtains the required CAPTCHA
-parameter using the pinned `pi-zcode` adapter. Node.js starts the public npm
+parameter using the pinned `pi-zcode` adapter. The local TUI owns an optional
+rate-limit continuation handler that sends one new message after a terminal
+provider failure. Node.js starts the public npm
 command and remains the compatibility host for the extracted upstream kernel.
 The official runtime directly owns raw terminal mode, IME cursor placement and
 resize handling; the launcher does not insert a second PTY or relay terminal

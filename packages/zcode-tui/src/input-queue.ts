@@ -2,6 +2,8 @@ import type { ProtectedSubmission } from "./selection-command.ts";
 import type { StreamEvent } from "./events.ts";
 
 export interface QueuedSubmission extends ProtectedSubmission {
+  /** Marks the one system-issued continuation after a terminal rate limit. */
+  rateLimitContinuation?: boolean;
   externalLogin?: boolean;
   pendingInputReservationId?: string;
   pendingInputIds?: string[];

@@ -139,6 +139,7 @@ import {
   type TurnNotificationKind
 } from "./notifications.ts";
 import { watchStreamErrors } from "./stream-error-guard.ts";
+import { isTerminalRateLimitFailure, rateLimitContinuationDelay, rateLimitContinuationPrompt } from "./rate-limit-continuation.ts";
 import { stopTui } from "./terminal-cleanup.ts";
 import {
   readTuiMode,
@@ -664,6 +665,9 @@ class ZCodeTui {
   private activeTurnId?: string;
   private turnEpoch = 0;
   private activeTurnEpoch?: number;
+  private rateLimitContinuationRemaining = 1;
+  private lastHandledRateLimitFailure?: string;
+  private pendingRateLimitContinuation?: { sessionId?: string; ready: boolean; timer: ReturnType<typeof setTimeout> };
   private modelStatusBlockId?: string;
   private pendingSteerInterrupt?: PendingSteerInterrupt;
   private recentSteerCommit?: { at: number; turnEpoch: number };
@@ -1620,6 +1624,10 @@ class ZCodeTui {
   private async submit(rawInput: string, queuedSubmission?: QueuedSubmission): Promise<boolean | undefined> {
     const input = (queuedSubmission?.input ?? rawInput).trim();
     if (!input || this.stopped) return false;
+    if (!queuedSubmission?.rateLimitContinuation) {
+      this.cancelRateLimitContinuation();
+      this.rateLimitContinuationRemaining = 1;
+    }
     const submission = queuedSubmission ?? protectSubmission(input);
     if (!input.startsWith("/") && !this.primaryTurnActive) {
       const allowed = await preflightSubmission({
@@ -2063,6 +2071,7 @@ class ZCodeTui {
       }
     }
     this.finishTurn(turnFinishState);
+    this.maybeSendRateLimitContinuation();
     return nextCommand;
   }
 
@@ -2319,6 +2328,7 @@ class ZCodeTui {
     if (turnEpoch !== undefined && turnEpoch !== this.activeTurnEpoch) return;
     const event = normalizeEvent(value);
     if (!event || this.isForeignSessionEvent(event)) return;
+    this.observeRateLimitFailure(event);
     if (runtimeContextRefreshNeeded(event)) this.runtimeContextCache.invalidate();
     if (this.handleDynamicWorkflowEvent(value, event.type)) return;
     const taskScoped = this.backgroundTaskEvents.isTaskScoped(event);
@@ -2504,6 +2514,7 @@ class ZCodeTui {
     this.debugEvent("session-subscription", value);
     const event = normalizeEvent(value);
     if (!event || this.isForeignSessionEvent(event)) return;
+    this.observeRateLimitFailure(event);
     if (runtimeContextRefreshNeeded(event)) this.runtimeContextCache.invalidate();
     if (this.handleDynamicWorkflowEvent(value, event.type)) return;
     this.applyBackgroundTaskEvent(event);
@@ -2513,6 +2524,50 @@ class ZCodeTui {
   private isForeignSessionEvent(event: StreamEvent): boolean {
     const sessionId = this.options.getMainSessionId?.() ?? this.sessionId;
     return Boolean(sessionId && event.sessionId && event.sessionId !== sessionId);
+  }
+
+  private observeRateLimitFailure(event: StreamEvent): void {
+    const failureId = event.turnId ?? event.inputId ?? event.eventId;
+    if (process.env.ZCODE_TUI_AUTO_CONTINUE_ON_RATE_LIMIT !== "1"
+      || this.rateLimitContinuationRemaining < 1 || this.pendingRateLimitContinuation
+      || (failureId !== undefined && failureId === this.lastHandledRateLimitFailure)
+      || !isTerminalRateLimitFailure(event)) return;
+    this.rateLimitContinuationRemaining -= 1;
+    this.lastHandledRateLimitFailure = failureId;
+    const sessionId = event.sessionId ?? this.options.getMainSessionId?.() ?? this.sessionId;
+    const pending = { sessionId, ready: false, timer: undefined as unknown as ReturnType<typeof setTimeout> };
+    pending.timer = setTimeout(() => {
+      if (this.pendingRateLimitContinuation !== pending) return;
+      pending.ready = true;
+      this.maybeSendRateLimitContinuation();
+    }, rateLimitContinuationDelay(process.env));
+    this.pendingRateLimitContinuation = pending;
+    this.addNotice("Provider rate limit exhausted; continuing this conversation after a short wait…", "warning");
+  }
+
+  private maybeSendRateLimitContinuation(): void {
+    const pending = this.pendingRateLimitContinuation;
+    if (!pending?.ready || this.stopped || this.primaryTurnActive || this.activeSubmissions > 0) return;
+    const currentSessionId = this.options.getMainSessionId?.() ?? this.sessionId;
+    if ((pending.sessionId && currentSessionId && pending.sessionId !== currentSessionId)
+      || this.inputQueue.hasFollowUps() || this.editor.getText().trim()) {
+      this.cancelRateLimitContinuation();
+      return;
+    }
+    this.pendingRateLimitContinuation = undefined;
+    void this.submit(rateLimitContinuationPrompt, {
+      ...protectSubmission(rateLimitContinuationPrompt),
+      rateLimitContinuation: true,
+      recordHistory: false,
+      suppressCompletionNotification: true
+    }).catch((error: unknown) => {
+      this.addNotice(error instanceof Error ? error.message : String(error), "error");
+    });
+  }
+
+  private cancelRateLimitContinuation(): void {
+    if (this.pendingRateLimitContinuation) clearTimeout(this.pendingRateLimitContinuation.timer);
+    this.pendingRateLimitContinuation = undefined;
   }
 
   private handleDynamicWorkflowEvent(value: unknown, type: string | undefined): boolean {
@@ -6096,6 +6151,7 @@ class ZCodeTui {
     if (this.fullscreenWelcomeTransitionTimer) clearTimeout(this.fullscreenWelcomeTransitionTimer);
     if (this.runtimeRefreshTimer) clearTimeout(this.runtimeRefreshTimer);
     if (this.runtimePollTimer) clearTimeout(this.runtimePollTimer);
+    this.cancelRateLimitContinuation();
     this.unsubscribeSession?.();
     this.unsubscribeWorkflow?.();
     const elapsedMilliseconds = this.turnStartedAt === undefined
